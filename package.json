@@ -9,6 +9,6 @@
   },
   "scripts": {
     "start": "node src/server.mjs",
-    "test": "node --test"
+    "test": "node --test --experimental-test-coverage"
   }
 }

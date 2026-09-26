@@ -33,3 +33,13 @@ test('Health mantiene JSON y admite query string', async () => {
   assert.equal(r.headers.get('cache-control'), 'no-store');
 });
 
+test('Ruta inexistente devuelve 404', async () => {
+  const r = await fetch(`${base}/missing`);
+  assert.equal(r.status, 404);
+  assert.deepEqual(await r.json(), { error: 'Ruta no encontrada' });
+});
+test('POST devuelve 405 y anuncia GET', async () => {
+  const r = await fetch(`${base}/health`, { method: 'POST' });
+  assert.equal(r.status, 405);
+  assert.equal(r.headers.get('allow'), 'GET');
+});
