@@ -1,0 +1,130 @@
+name: TechBank CI/CD
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: techbank-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Pruebas Node.js
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Ejecutar pruebas
+        run: |
+          mkdir -p evidence
+          set -o pipefail
+          npm test 2>&1 | tee evidence/tests.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: pruebas-${{ github.run_id }}
+          path: evidence/
+          retention-days: 14
+
+  docker:
+    name: Construir imagen Docker
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Construir y exportar la imagen
+        env:
+          APP_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p image
+          docker build --label org.opencontainers.image.revision="$APP_SHA" -t techbank-qa:"$APP_SHA" .
+          docker image inspect techbank-qa:"$APP_SHA" --format '{{.Id}}' | tee image/image-id.txt
+          docker save techbank-qa:"$APP_SHA" -o image/techbank-image.tar
+      - uses: actions/upload-artifact@v7
+        with:
+          name: imagen-${{ github.run_id }}
+          path: image/
+          retention-days: 1
+          compression-level: 0
+
+  deploy:
+    name: Desplegar y validar QA
+    needs: docker
+    if: github.ref == 'refs/heads/develop' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: qa
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v8
+        with:
+          name: imagen-${{ github.run_id }}
+          path: image
+      - name: Cargar la misma imagen construida
+        env:
+          APP_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker load -i image/techbank-image.tar
+          test "$(docker image inspect techbank-qa:"$APP_SHA" --format '{{.Id}}')" = "$(cat image/image-id.txt)"
+      - name: Desplegar contenedor y comprobar salud
+        env:
+          APP_SHA: ${{ github.sha }}
+        run: bash scripts/qa.sh
+      - name: Medir latencia y recursos
+        run: |
+          set -euo pipefail
+          docker stats techbank-qa --format '{{json .}}' > evidence/docker-stats.ndjson &
+          STATS_PID=$!
+          trap 'kill "$STATS_PID" 2>/dev/null || true' EXIT
+          node scripts/load.mjs | tee evidence/load.json
+      - name: Resumen de evidencia
+        if: always()
+        run: |
+          {
+            echo '## QA temporal de TechBank'
+            echo 'Contenedor Docker dentro del runner. Se elimina al finalizar el job.'
+            echo '### Health check'
+            echo '```json'
+            cat evidence/health.json 2>/dev/null || true
+            echo ''
+            echo '```'
+            echo '### Prueba de carga breve'
+            echo '```json'
+            cat evidence/load.json 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Guardar evidencias de QA
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: qa-${{ github.run_id }}
+          path: evidence/
+          retention-days: 14
+      - name: Limpiar QA temporal
+        if: always()
+        run: docker rm -f techbank-qa || true

@@ -1,0 +1,14 @@
+{
+  "name": "techbank-lab",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "API didactica para el laboratorio CI/CD de TechBank",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test"
+  }
+}
