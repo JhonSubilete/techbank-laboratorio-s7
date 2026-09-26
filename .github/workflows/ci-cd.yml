@@ -29,7 +29,7 @@ jobs:
           cache: npm
       - name: Instalar dependencias
         run: npm ci
-      - name: Ejecutar pruebas
+      - name: Pruebas y cobertura
         run: |
           mkdir -p evidence
           set -o pipefail

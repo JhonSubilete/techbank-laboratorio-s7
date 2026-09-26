@@ -24,7 +24,7 @@ curl --fail --silent --show-error -D evidence/http-headers.txt \
 cat evidence/http-headers.txt
 cat evidence/health.json
 echo
-jq -e '.status == "ok" and .environment == "qa"' evidence/health.json
+jq -e --arg expected "$APP_SHA" '.status == "ok" and .environment == "qa" and .version == $expected' evidence/health.json
 curl --fail --silent --show-error http://127.0.0.1:3000/ | tee evidence/root.json
 echo
 curl --fail --silent --show-error http://127.0.0.1:3000/api/status | tee evidence/status.json
